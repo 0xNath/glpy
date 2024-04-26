@@ -3,7 +3,6 @@ import argparse
 from glpi import GLPI
 from pprint import pprint
 
-
 def setupArgumentsParsing():
     parser = argparse.ArgumentParser(
         prog="GLPI REST API client",
@@ -14,23 +13,10 @@ def setupArgumentsParsing():
     parser.add_argument("-u", "--username")
     parser.add_argument("-p", "--password")
     parser.add_argument("-ut", "--userToken")
-    parser.add_argument("-a", "--applicationToken")
+    parser.add_argument("-at", "--applicationToken")
+    parser.add_argument("-ap", "--APIPath", default="/apirest.php")
 
     return parser.parse_args()
-
-
-def exemple() -> None:
-    """
-    This exemple show how to get the list of GLPI tickets and display infos on the first ticket.
-    """
-
-    tickets = server.search("Ticket")
-
-    pprint(tickets)
-
-    for ticket in tickets["data"]:
-        pprint(server.getItem("Ticket", ticket["2"]))
-        break
 
 
 if __name__ == "__main__":
@@ -46,5 +32,3 @@ if __name__ == "__main__":
 
     if args.userToken:
         server.authUsingToken(args.userToken)
-
-    exemple()
