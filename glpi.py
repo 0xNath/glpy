@@ -1,12 +1,19 @@
+import docx.document
 import requests
 import base64
 import html
 import re
-from PIL import Image
-from bs4 import BeautifulSoup
+
 import atexit
 import pytesseract
 from io import BytesIO
+from typing import BinaryIO
+
+from openpyxl import load_workbook
+from docx import Document as docxDocument
+from pypdf import PdfReader
+from PIL import Image
+from bs4 import BeautifulSoup
 
 
 def verifyAuthentication(function):
@@ -148,6 +155,14 @@ class GLPI:
         return getItemRequest.json()
 
     @verifyAuthentication
+    def getSubItem(self, itemType: str, itemID: int, subItemType: str) -> dict:
+        getItemRequest = self.session.get(
+            f"{self.url}{self.APIPath}/{itemType}/{itemID}/{subItemType}"
+        )
+
+        return getItemRequest.json()
+
+    @verifyAuthentication
     def getMyEntities(self, is_recursive: bool = False) -> str:
 
         parameters = {"is_recursive": is_recursive}
@@ -163,53 +178,165 @@ class GLPI:
         self.session.get(f"{self.url}{self.APIPath}/killSession")
 
     @verifyAuthentication
+    def downloadDocument(self, documentID: int) -> BinaryIO:
+        requestResponse = self.session.get(
+            f"{self.url}{self.APIPath}/Document/{documentID}",
+            headers={"Accept": "application/octet-stream"},
+            stream=True,
+        )
+
+        if requestResponse.status_code == 200:
+            return BytesIO(requestResponse.content)
+        else:
+            raise BaseException(requestResponse.json())
+
+    def getTextFromImage(self, document: BinaryIO | bytes) -> str:
+        if type(document) == bytes:
+            document = BytesIO(document)
+        return pytesseract.image_to_string(Image.open(document), lang="fre+eng")
+
+    def parseAndSoupHTMLContent(self, text: str) -> str:
+        return str(BeautifulSoup(html.unescape(text), features="html.parser"))
+
+    def searchTextInItemDocuments(
+        self, text: str, itemType: str, itemID: int
+    ) -> tuple[bool, str]:
+        for document in self.getSubItem(itemType, itemID, "Document"):
+            if document["mime"].find("image") >= 0:
+                textPosition = self.getTextFromImage(
+                    self.downloadDocument(document["id"])
+                ).find(text)
+
+                if textPosition >= 0:
+                    return (
+                        True,
+                        f"Found '{text}' in image '{document['name']}' at position {textPosition}.",
+                    )
+            elif document["mime"] == "application/pdf":
+                reader = PdfReader(self.downloadDocument(document["id"]))
+
+                for pagePosition in range(0, len(reader.pages)):
+                    page = reader.pages[pagePosition]
+                    textPosition = page.extract_text().find(text)
+
+                    if textPosition >= 0:
+                        return (
+                            True,
+                            f"Found '{text}' in pdf '{document['name']}' at page {pagePosition}, position {textPosition}.",
+                        )
+
+                    for image in page.images:
+                        textPosition = self.getTextFromImage(image.data).find(text)
+
+                        if textPosition >= 0:
+                            return (
+                                True,
+                                f"Found '{text}' in pdf '{document['name']}' at page {pagePosition}, in image '{image.name}' at position {textPosition}.",
+                            )
+
+            elif document["filename"].find(".docx") >= 0:
+                reader = docxDocument(self.downloadDocument(document["id"]))
+
+                for p in reader.paragraphs:
+                    textPosition = p.text.find(text)
+
+                    if textPosition >= 0:
+                        return (
+                            True,
+                            f"Found '{text}' in pdf '{document['name']}', position {textPosition}.",
+                        )
+            elif document["filename"].find(".xlsx") >= 0:
+                wb = load_workbook(self.downloadDocument(document["id"]))
+
+                for sheetName in wb.sheetnames:
+                    sheet = wb[sheetName]
+                    for row in range(1, sheet.max_row + 1):
+                        for column in range(1, sheet.max_column + 1):
+                            textPosition = str(sheet.cell(row, column).value).find(text)
+
+                            if textPosition >= 0:
+                                return (
+                                    True,
+                                    f"Found '{text}' in spreadsheet '{document['name']}', position {textPosition}.",
+                                )
+
+            else:
+                print(document)
+
+        return (False, "")
+
+    @verifyAuthentication
     def deepSearchInTicket(
         self,
         text: str,
         ticketNumber: int,
-        searchInPictures: bool = False,
+        searchInImages: bool = False,
         searchInDOCX: bool = True,
         searchInXLSX: bool = True,
         searchInPDF: bool = True,
         searchInUnknownFiles: bool = True,
         followTicketLinks: bool = True,
         searchInReplies: bool = True,
-    ) -> bool:
+    ) -> tuple[bool, str]:
 
         ticket = self.getItem("Ticket", itemID=ticketNumber)
 
-        ticket["content"] = str(html.unescape(ticket["content"]))
-
-        soup = BeautifulSoup(ticket["content"], features="html.parser")
-
-        textPosition = ticket["content"].find(text)
+        textPosition = self.parseAndSoupHTMLContent(ticket["name"]).find(text)
 
         if textPosition >= 0:
-            print(f"Found '{text}' in ticket Content at position {textPosition}.")
-            return True
+            return (
+                True,
+                f"Found '{text}' in ticket {ticket['id']} title at position {textPosition}.",
+            )
 
-        if searchInPictures:
-            for image in soup.find_all("img"):
+        textPosition = self.parseAndSoupHTMLContent(ticket["content"]).find(text)
 
-                if image["src"].find("http") == 0:
-                    src = image["src"]
+        if textPosition >= 0:
+            return (
+                True,
+                f"Found '{text}' in ticket {ticket['id']} at position {textPosition}.",
+            )
+
+        foundInImage, imageSearchResult = self.searchTextInItemDocuments(
+            itemType="Ticket", text=text, itemID=ticket["id"]
+        )
+
+        if foundInImage:
+            return (
+                True,
+                f"Result found in ticket {ticketNumber} :\n{imageSearchResult}",
+            )
+
+        for subItemCategory in [
+            "ITILFollowup",
+            "TicketTask",
+            "TicketValidation",
+            "ITILSolution",
+        ]:
+            for subItem in self.getSubItem("Ticket", ticketNumber, subItemCategory):
+                if subItemCategory == "TicketValidation":
+                    textPosition = self.parseAndSoupHTMLContent(
+                        subItem["comment_submission"]
+                    ).find(text)
                 else:
-                    src = self.url + image["src"]
-
-                requestResponse = self.session.get(f"{src}", stream=True)
-
-                imageFileStream = BytesIO(requestResponse.content)
-
-                textFromImage = str(
-                    pytesseract.image_to_string(Image.open(imageFileStream))
-                )
-
-                textPosition = textFromImage.find(text)
+                    textPosition = self.parseAndSoupHTMLContent(
+                        subItem["content"]
+                    ).find(text)
 
                 if textPosition >= 0:
-                    print(
-                        f"Found '{text}' in image at position {textPosition} :\n{src}\n{textFromImage}"
+                    return (
+                        True,
+                        f"Found '{text}' at position {textPosition} in {subItemCategory} {subItem['id']}.",
                     )
-                    return True
 
-        return False
+                foundInImage, imageSearchResult = self.searchTextInItemDocuments(
+                    itemType=subItemCategory, text=text, itemID=subItem["id"]
+                )
+
+                if foundInImage:
+                    return (
+                        True,
+                        f"Found '{text}' in {subItemCategory} {subItem['id']} :\n\t-{imageSearchResult}",
+                    )
+
+        return (False, "")
