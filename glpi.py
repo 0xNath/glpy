@@ -1,8 +1,10 @@
-import docx.document
+from pprint import pprint
 import requests
 import base64
 import html
 import re
+import sys
+import argparse
 
 import atexit
 import pytesseract
@@ -14,6 +16,40 @@ from docx import Document as docxDocument
 from pypdf import PdfReader
 from PIL import Image
 from bs4 import BeautifulSoup
+
+
+class arguments:
+    url = None
+    username = None
+    password = None
+    userToken = None
+    applicationToken = None
+    APIPath = None
+    sessionToken = None
+
+    ticketNumbers = None
+    textToSearch = None
+    closeSession = True
+
+
+def setupArgumentsParsing():
+    parser = argparse.ArgumentParser(
+        prog="GLPI REST API client",
+        description="This program can be used to retriview informations from a GLPI server.",
+    )
+
+    parser.add_argument("-url", "--url")
+    parser.add_argument("-u", "--username")
+    parser.add_argument("-p", "--password")
+    parser.add_argument("-ut", "--userToken")
+    parser.add_argument("-at", "--applicationToken")
+    parser.add_argument("-ap", "--APIPath", default="/apirest.php")
+    parser.add_argument("-st", "--sessionToken")
+    parser.add_argument("-tn", "--ticketNumbers")
+    parser.add_argument("-ts", "--textToSearch")
+    parser.add_argument("-cs", "--closeSession", default=True)
+
+    return parser.parse_args(namespace=arguments)
 
 
 def verifyAuthentication(function):
@@ -45,14 +81,18 @@ class GLPI:
         self.url = url
         self.APIPath = APIPath
 
+        self._closeSession = False
         self.__authenticated = False
 
         self.session = requests.Session()
         self.session.headers = {"Content-Type": "application/json"}
 
     def __close(self) -> None:
-        if self.__authenticated:
+        if self.__authenticated and self._closeSession:
             self.killSession()
+
+    def _getSessionToken(self) -> str:
+        return self.session.headers.get("Session-Token")
 
     def authUsingCredentials(self, username: str, password: str):
         credentials = username + ":" + password
@@ -72,17 +112,21 @@ class GLPI:
     def setApplicationToken(self, appToken: str):
         self.session.headers.update({"App-Token": appToken})
 
+    def _getApplicationToken(self) -> str:
+        return self.session.headers.get("App-Token")
+
     def __initSession(self):
         initSessionRequest = self.session.get(
             f"{self.url}{self.APIPath}/initSession",
             params={"get_full_session": True},
         )
 
-        if (not initSessionRequest.status_code == 200) or initSessionRequest.headers[
-            "Content-Type"
-        ] == "text/html; charset=UTF-8":
-            result = initSessionRequest.json()
-            raise BaseException(f"{result[0]} : {result[1]}")
+        if not initSessionRequest.status_code == 200:
+            raise BaseException(
+                str(initSessionRequest.status_code)
+                + " "
+                + str(initSessionRequest.reason)
+            )
 
         self.session.headers.pop("Authorization")
 
@@ -94,6 +138,10 @@ class GLPI:
 
         self.__authenticated = True
 
+    def _setSessionToken(self, value):
+        self.__authenticated = True
+        self.session.headers.update({"Session-Token": value})
+
     def searchOptions(self, itemType: str = "AllAssets", raw: bool = False):
 
         parameters = {"raw": None} if raw else {}
@@ -104,7 +152,21 @@ class GLPI:
         )
 
         if searchOptionsRequest.status_code == 200:
-            return searchOptionsRequest.json()
+            result = {}
+
+            for name, value in list(searchOptionsRequest.json().items()):
+                if len(value) == 1:
+                    last_name = name
+                    result.update({name: {}})
+                else:
+                    buffer = dict(value)
+                    buffer.update({"field": int(name)})
+                    buffer_name = value["name"]
+                    buffer.pop("name")
+
+                    result[last_name].update({buffer_name: buffer})
+
+            return result
         elif searchOptionsRequest.status_code == 401:
             raise searchOptionsRequest.json()
         else:
@@ -137,22 +199,25 @@ class GLPI:
             f"{self.url}{self.APIPath}/search/{itemType}", params=parameters
         )
 
-        if searchRequest.status_code == 200:
+        if searchRequest.status_code == 200 or searchRequest.status_code == 206:
             return searchRequest.json()
         elif searchRequest.status_code == 401:
             raise searchRequest.json()
         else:
             raise BaseException(
-                f"Unknow status code for this path : {searchRequest.status_code}.\n{searchRequest.json()}"
+                f"Unknow status code for this path : {searchRequest.status_code}."
             )
 
     @verifyAuthentication
     def getItem(self, itemType: str, itemID: int) -> dict:
+
         getItemRequest = self.session.get(
             f"{self.url}{self.APIPath}/{itemType}/{itemID}"
         )
-
-        return getItemRequest.json()
+        if getItemRequest.status_code == 200 or getItemRequest.status_code == 206:
+            return getItemRequest.json()
+        else:
+            sys.stderr.write(str(getItemRequest) + "\n")
 
     @verifyAuthentication
     def getSubItem(self, itemType: str, itemID: int, subItemType: str) -> dict:
@@ -260,9 +325,6 @@ class GLPI:
                                     f"Found '{text}' in spreadsheet '{document['name']}', position {textPosition}.",
                                 )
 
-            else:
-                print(document)
-
         return (False, "")
 
     @verifyAuthentication
@@ -340,3 +402,42 @@ class GLPI:
                     )
 
         return (False, "")
+
+if __name__ == "__main__":
+    args = setupArgumentsParsing()
+
+    server = GLPI(args.url)
+
+    server._closeSession = args.closeSession
+
+    if args.applicationToken:
+        server.setApplicationToken(args.applicationToken)
+
+    if args.sessionToken:
+        server._setSessionToken(args.sessionToken)
+    elif args.userToken:
+        server.authUsingToken(args.userToken)
+    elif args.username and args.password:
+        server.authUsingCredentials(args.username, args.password)
+
+    if args.ticketNumbers and args.textToSearch:
+        for ticketNumber in args.ticketNumbers.split(","):
+            isFound, message = server.deepSearchInTicket(
+                text=args.textToSearch,
+                ticketNumber=int(ticketNumber),
+                searchInReplies=True,
+                searchInDOCX=True,
+                searchInImages=True,
+                searchInPDF=True,
+                searchInUnknownFiles=True,
+                searchInXLSX=True,
+            )
+
+            if isFound:
+                sys.stdout.write(message)
+            else:
+                sys.stdout.write(f"Not found in {ticketNumber}")
+
+            sys.stdout.flush()
+
+        sys.exit(0)
