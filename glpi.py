@@ -320,7 +320,7 @@ class GLPI:
                     if textPosition >= 0:
                         return (
                             True,
-                            f"Found '{text}' in pdf '{document['name']}', position {textPosition}.",
+                            f"Found '{text}' in docx '{document['name']}', position {textPosition}.",
                         )
             elif document["filename"].find(".xlsx") >= 0:
                 wb = load_workbook(self.downloadDocument(document["id"]))
@@ -381,7 +381,7 @@ class GLPI:
         if foundInImage:
             return (
                 True,
-                f"Result found in ticket {ticketNumber} :\n{imageSearchResult}",
+                f"Result found in ticket {ticketNumber} -> {imageSearchResult}",
             )
 
         for subItemCategory in [
@@ -413,7 +413,7 @@ class GLPI:
                 if foundInImage:
                     return (
                         True,
-                        f"Found '{text}' in {subItemCategory} {subItem['id']} :\n\t-{imageSearchResult}",
+                        f"Found '{text}' in {subItemCategory} {subItem['id']} -> \t-{imageSearchResult}",
                     )
 
         return (False, "")
@@ -453,7 +453,7 @@ if __name__ == "__main__":
                     json.dumps(
                         {
                             "Ticket.id": ticketNumber,
-                            "progress": True,
+                            "progress": "Found",
                             "result": message,
                         }
                     )
@@ -463,7 +463,7 @@ if __name__ == "__main__":
                     json.dumps(
                         {
                             "Ticket.id": ticketNumber,
-                            "progress": False,
+                            "progress": "Not found",
                             "result": "",
                         }
                     )

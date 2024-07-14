@@ -38,8 +38,7 @@ class mainWindow(QtWidgets.QWidget):
 
         self.tableWidget_results.horizontalHeader().setStretchLastSection(True)
 
-        # self.tableWidget_results.sortByColumn(1, QtCore.Qt.SortOrder.DescendingOrder)
-        self.tableWidget_results.setSortingEnabled(True)
+        self.tableWidget_results.sortByColumn(1, QtCore.Qt.SortOrder.AscendingOrder)
         self.layout.addWidget(self.tableWidget_results)
 
         self.progressBar_search = QtWidgets.QProgressBar(self)
@@ -54,7 +53,7 @@ class mainWindow(QtWidgets.QWidget):
 
         self.setWindowTitle("GLPY - Search")
 
-        self.setMinimumSize(400, 300)
+        self.setMinimumSize(750, 800)
 
         self.server = GLPIServer
 
@@ -65,6 +64,8 @@ class mainWindow(QtWidgets.QWidget):
         self.tickets: List[dict] = []
         self.ticketsPools: List[str] = [""] * len(self.availableCores)
         self.ticketsSearched = 0
+
+        self.ticketIDLength = 1
 
         self.layout = QtWidgets.QVBoxLayout(self)
 
@@ -86,9 +87,21 @@ class mainWindow(QtWidgets.QWidget):
 
         self.progressBar_search.setValue(self.ticketsSearched)
 
-        pos = list(self.tickets).index(object["Ticket.id"])
-        self.tableWidget_results.item(pos, 1).setText(str(object["progress"]))
-        self.tableWidget_results.item(pos, 2).setText(object["result"])
+        self.tableWidget_results.item(
+            self.tableWidget_results.findItems(
+                object["Ticket.id"].zfill(self.ticketIDLength),
+                QtCore.Qt.MatchFlag.MatchExactly,
+            )[0].row(),
+            1,
+        ).setText(str(object["progress"]))
+
+        self.tableWidget_results.item(
+            self.tableWidget_results.findItems(
+                object["Ticket.id"].zfill(self.ticketIDLength),
+                QtCore.Qt.MatchFlag.MatchExactly,
+            )[0].row(),
+            2,
+        ).setText(object["result"])
 
     def handle_stderr(self, pos: int):
         data = self.searchProcessPools[pos].readAllStandardError()
@@ -108,10 +121,16 @@ class mainWindow(QtWidgets.QWidget):
     def search(self):
         self.pushButton_search.setDisabled(True)
         self.lineEdit_text.setDisabled(True)
+        self.tableWidget_results.setSortingEnabled(False)
 
         self.tickets = list(
             self.server.search(itemType="Ticket", range="0-9999999999")["data"].keys()
         )
+
+        self.ticketIDLength = 1
+        for ticket in self.tickets:
+            if len(ticket) > self.ticketIDLength:
+                self.ticketIDLength = len(ticket)
 
         self.tableWidget_results.clearContents()
         self.tableWidget_results.setRowCount(len(self.tickets))
@@ -128,7 +147,9 @@ class mainWindow(QtWidgets.QWidget):
             self.tableWidget_results.setItem(
                 ticketPosition,
                 0,
-                QtWidgets.QTableWidgetItem(str(self.tickets[ticketPosition]).zfill(7)),
+                QtWidgets.QTableWidgetItem(
+                    str(self.tickets[ticketPosition]).zfill(self.ticketIDLength)
+                ),
             )
 
             self.tableWidget_results.item(ticketPosition, 0).setTextAlignment(
@@ -186,6 +207,7 @@ class mainWindow(QtWidgets.QWidget):
                 ],
             )
 
+        self.tableWidget_results.setSortingEnabled(True)
 
 class authWindow(QtWidgets.QWidget):
 
@@ -311,35 +333,3 @@ if __name__ == "__main__":
     authWidget = authWindow(args, mainWidget)
 
     sys.exit(app.exec())
-
-    ticketOptions = server.searchOptions(itemType="Ticket", raw=True)
-
-    for category in ticketOptions.values():
-        category = dict(category)
-        # pprint(category)
-
-        for optionName, value in category.items():
-            # pprint(value["uid"].split(".")[-1:-2], sort_dicts=False)
-            # if value["datatype"] == "dropdown":
-            d = value["uid"].split(".")[-2]
-            e = value["uid"].split(".")[-1]
-
-            # t = server.getItem(d, itemID=0)
-
-            print(optionName, ":", f"{d} -> {e}", value["available_searchtypes"])
-
-    exit()
-
-    isFound, message = server.deepSearchInTicket(
-        text="test",
-        ticketNumber=1,
-        searchInReplies=True,
-        searchInDOCX=True,
-        searchInImages=True,
-        searchInPDF=True,
-        searchInUnknownFiles=True,
-        searchInXLSX=True,
-    )
-
-    if isFound:
-        print(message)
