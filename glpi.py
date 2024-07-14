@@ -1,10 +1,11 @@
-from pprint import pprint
+#!python
 import requests
 import base64
 import html
 import re
 import sys
 import argparse
+import json
 
 import atexit
 import pytesseract
@@ -57,11 +58,13 @@ def verifyAuthentication(function):
 
     def verify(self, *args, **kargs):
         if not self._GLPI__authenticated:
-            print(
-                "You are not authenticated. "
-                "Use argument -h/--help , or look at the online documentation https://github.com/0xNath/glpy for help."
+            sys.stderr.write(
+                str(
+                    "You are not authenticated. "
+                    "Use argument -h/--help , or look at the online documentation https://github.com/0xNath/glpy for help."
+                )
             )
-            exit(1)
+            sys.exit(1)
 
         return function(self, *args, **kargs)
 
@@ -214,10 +217,19 @@ class GLPI:
         getItemRequest = self.session.get(
             f"{self.url}{self.APIPath}/{itemType}/{itemID}"
         )
+
         if getItemRequest.status_code == 200 or getItemRequest.status_code == 206:
             return getItemRequest.json()
         else:
-            sys.stderr.write(str(getItemRequest) + "\n")
+            sys.stderr.write(
+                str(itemID)
+                + " "
+                + str(getItemRequest)
+                + " "
+                + getItemRequest.reason
+                + "\n"
+            )
+            sys.exit(1)
 
     @verifyAuthentication
     def getSubItem(self, itemType: str, itemID: int, subItemType: str) -> dict:
@@ -343,7 +355,10 @@ class GLPI:
 
         ticket = self.getItem("Ticket", itemID=ticketNumber)
 
-        textPosition = self.parseAndSoupHTMLContent(ticket["name"]).find(text)
+        try:
+            textPosition = self.parseAndSoupHTMLContent(ticket["name"]).find(text)
+        except TypeError as e:
+            print(e, ticket)
 
         if textPosition >= 0:
             return (
@@ -434,9 +449,25 @@ if __name__ == "__main__":
             )
 
             if isFound:
-                sys.stdout.write(message)
+                sys.stdout.write(
+                    json.dumps(
+                        {
+                            "Ticket.id": ticketNumber,
+                            "progress": True,
+                            "result": message,
+                        }
+                    )
+                )
             else:
-                sys.stdout.write(f"Not found in {ticketNumber}")
+                sys.stdout.write(
+                    json.dumps(
+                        {
+                            "Ticket.id": ticketNumber,
+                            "progress": False,
+                            "result": "",
+                        }
+                    )
+                )
 
             sys.stdout.flush()
 

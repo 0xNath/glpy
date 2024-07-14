@@ -1,9 +1,8 @@
 #!python
-from pprint import pprint
 from glpi import arguments, setupArgumentsParsing, GLPI as GLPIServer
 from typing import List
 import os
-from math import floor
+import json
 
 import sys
 from PySide6 import QtCore, QtWidgets, QtGui
@@ -16,20 +15,35 @@ class mainWindow(QtWidgets.QWidget):
         self.lineEdit_text.setPlaceholderText("Text to search")
         self.layout.addWidget(self.lineEdit_text)
 
-        self.label_result = QtWidgets.QLabel()
-        self.label_result.setWordWrap(True)
-        self.label_result.setStyleSheet("QLabel { color : green; }")
-        self.label_result.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
-        self.label_result.hide()
-        self.layout.addWidget(self.label_result)
+        self.tableWidget_results = QtWidgets.QTableWidget()
+        # self.tableWidget_results.hide()
+        self.tableWidget_results.setColumnCount(3)
+        self.tableWidget_results.verticalHeader().hide()
 
-        self.spacer = QtWidgets.QSpacerItem(
-            0,
-            0,
-            hData=QtWidgets.QSizePolicy.Policy.Expanding,
-            vData=QtWidgets.QSizePolicy.Policy.Expanding,
+        self.tableWidget_results.setHorizontalHeaderItem(
+            0, QtWidgets.QTableWidgetItem("Ticket ID")
         )
-        self.layout.addItem(self.spacer)
+
+        self.tableWidget_results.setHorizontalHeaderItem(
+            1, QtWidgets.QTableWidgetItem("progress")
+        )
+
+        self.tableWidget_results.setHorizontalHeaderItem(
+            2, QtWidgets.QTableWidgetItem("result")
+        )
+
+        self.tableWidget_results.horizontalHeader().setSectionResizeMode(
+            QtWidgets.QHeaderView.ResizeMode.ResizeToContents
+        )
+
+        self.tableWidget_results.horizontalHeader().setStretchLastSection(True)
+
+        # self.tableWidget_results.sortByColumn(1, QtCore.Qt.SortOrder.DescendingOrder)
+        self.tableWidget_results.setSortingEnabled(True)
+        self.layout.addWidget(self.tableWidget_results)
+
+        self.progressBar_search = QtWidgets.QProgressBar(self)
+        self.layout.addWidget(self.progressBar_search)
 
         self.pushButton_search = QtWidgets.QPushButton("Search")
         self.layout.addWidget(self.pushButton_search)
@@ -47,8 +61,10 @@ class mainWindow(QtWidgets.QWidget):
         self.availableCores = os.sched_getaffinity(0)
 
         self.searchProcessPools: List[QtCore.QProcess] = []
+        self.processFinished = 0
         self.tickets: List[dict] = []
         self.ticketsPools: List[str] = [""] * len(self.availableCores)
+        self.ticketsSearched = 0
 
         self.layout = QtWidgets.QVBoxLayout(self)
 
@@ -60,25 +76,36 @@ class mainWindow(QtWidgets.QWidget):
     def handle_stdout(self, pos: int):
         data = self.searchProcessPools[pos].readAllStandardOutput()
         stdout = bytes(data).decode("utf8")
-        print(stdout)
-        # self.label_result.setText(stdout)
-        self.label_result.show()
+        try:
+            object = json.loads(stdout)
+        except Exception as e:
+            print(e, stdout)
+            exit()
 
-        self.lineEdit_text.setDisabled(False)
-        self.pushButton_search.setDisabled(False)
+        self.ticketsSearched += 1
+
+        self.progressBar_search.setValue(self.ticketsSearched)
+
+        pos = list(self.tickets).index(object["Ticket.id"])
+        self.tableWidget_results.item(pos, 1).setText(str(object["progress"]))
+        self.tableWidget_results.item(pos, 2).setText(object["result"])
 
     def handle_stderr(self, pos: int):
         data = self.searchProcessPools[pos].readAllStandardError()
         stderr = bytes(data).decode("utf8")
-        print(stderr)
+        print(stderr, file=sys.stderr)
 
     def process_finished(self, pos: int):
-        ...
-        # self.searchProcessPools[pos].deleteLater()
-        # self.searchProcessPools.pop(pos)
+        self.processFinished += 1
+
+        if self.processFinished == len(self.searchProcessPools):
+            self.lineEdit_text.setDisabled(False)
+            self.pushButton_search.setDisabled(False)
+
+            self.searchProcessPools: List[QtCore.QProcess] = []
+            self.ticketsPools: List[str] = [""] * len(self.availableCores)
 
     def search(self):
-        self.label_result.hide()
         self.pushButton_search.setDisabled(True)
         self.lineEdit_text.setDisabled(True)
 
@@ -86,9 +113,42 @@ class mainWindow(QtWidgets.QWidget):
             self.server.search(itemType="Ticket", range="0-9999999999")["data"].keys()
         )
 
+        self.tableWidget_results.clearContents()
+        self.tableWidget_results.setRowCount(len(self.tickets))
+        self.progressBar_search.setRange(0, len(self.tickets))
+        self.progressBar_search.setValue(0)
+        self.processFinished = 0
+        self.ticketsSearched = 0
+
         for ticketPosition in range(0, len(self.tickets)):
             self.ticketsPools[ticketPosition % len(self.availableCores)] += (
                 self.tickets[ticketPosition] + ","
+            )
+
+            self.tableWidget_results.setItem(
+                ticketPosition,
+                0,
+                QtWidgets.QTableWidgetItem(str(self.tickets[ticketPosition]).zfill(7)),
+            )
+
+            self.tableWidget_results.item(ticketPosition, 0).setTextAlignment(
+                QtCore.Qt.AlignmentFlag.AlignHCenter
+            )
+
+            self.tableWidget_results.setItem(
+                ticketPosition,
+                1,
+                QtWidgets.QTableWidgetItem("Search not started"),
+            )
+
+            self.tableWidget_results.item(ticketPosition, 1).setTextAlignment(
+                QtCore.Qt.AlignmentFlag.AlignHCenter
+            )
+
+            self.tableWidget_results.setItem(
+                ticketPosition,
+                2,
+                QtWidgets.QTableWidgetItem(""),
             )
 
         for ticketsPool in range(0, len(self.ticketsPools)):
