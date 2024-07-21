@@ -11,9 +11,9 @@ from PySide6 import QtCore, QtWidgets, QtGui
 class mainWindow(QtWidgets.QWidget):
 
     def __setupWidgets(self):
-        self.lineEdit_text = QtWidgets.QLineEdit()
+        self.lineEdit_text = QtWidgets.QLineEdit(self)
         self.lineEdit_text.setPlaceholderText("Text to search")
-        self.layout.addWidget(self.lineEdit_text)
+        self.layout().addWidget(self.lineEdit_text)
 
         self.tableWidget_results = QtWidgets.QTableWidget()
         # self.tableWidget_results.hide()
@@ -39,13 +39,13 @@ class mainWindow(QtWidgets.QWidget):
         self.tableWidget_results.horizontalHeader().setStretchLastSection(True)
 
         self.tableWidget_results.sortByColumn(1, QtCore.Qt.SortOrder.AscendingOrder)
-        self.layout.addWidget(self.tableWidget_results)
+        self.layout().addWidget(self.tableWidget_results)
 
         self.progressBar_search = QtWidgets.QProgressBar(self)
-        self.layout.addWidget(self.progressBar_search)
+        self.layout().addWidget(self.progressBar_search)
 
         self.pushButton_search = QtWidgets.QPushButton("Search")
-        self.layout.addWidget(self.pushButton_search)
+        self.layout().addWidget(self.pushButton_search)
         self.pushButton_search.clicked.connect(self.search)
 
     def __init__(self):
@@ -67,7 +67,7 @@ class mainWindow(QtWidgets.QWidget):
 
         self.ticketIDLength = 1
 
-        self.layout = QtWidgets.QVBoxLayout(self)
+        self.setLayout(QtWidgets.QVBoxLayout())
 
         self.__setupWidgets()
 
@@ -218,7 +218,7 @@ class authWindow(QtWidgets.QWidget):
 
         self.setMinimumSize(400, 300)
 
-        self.layout = QtWidgets.QVBoxLayout(self)
+        self.setLayout(QtWidgets.QVBoxLayout())
 
         self.__setupWidgets()
 
@@ -233,21 +233,21 @@ class authWindow(QtWidgets.QWidget):
     def __setupWidgets(self):
         self.textEdit_url = QtWidgets.QLineEdit(self)
         self.textEdit_url.setPlaceholderText("URL of the GLPI server web interface")
-        self.layout.addWidget(self.textEdit_url)
+        self.layout().addWidget(self.textEdit_url)
 
         self.textEdit_applicationToken = QtWidgets.QLineEdit(self)
         self.textEdit_applicationToken.setPlaceholderText("Application token")
-        self.layout.addWidget(self.textEdit_applicationToken)
+        self.layout().addWidget(self.textEdit_applicationToken)
 
         self.widget_tokens = QtWidgets.QWidget(self)
-        self.widget_tokens.layout = QtWidgets.QVBoxLayout(self.widget_tokens)
+        self.widget_tokens.setLayout(QtWidgets.QVBoxLayout())
 
         self.textEdit_userToken = QtWidgets.QLineEdit(self.widget_tokens)
         self.textEdit_userToken.setPlaceholderText("User token")
         self.textEdit_userToken.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
 
-        self.widget_tokens.layout.addWidget(self.textEdit_userToken)
-        self.layout.addWidget(self.widget_tokens)
+        self.widget_tokens.layout().addWidget(self.textEdit_userToken)
+        self.layout().addWidget(self.widget_tokens)
 
         self.widget_credentials = QtWidgets.QWidget(self)
         self.widget_credentials.layout = QtWidgets.QVBoxLayout(self.widget_credentials)
@@ -258,19 +258,19 @@ class authWindow(QtWidgets.QWidget):
         self.textEdit_password.setPlaceholderText("Password")
         self.textEdit_password.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
 
-        self.widget_credentials.layout.addWidget(self.textEdit_username)
-        self.widget_credentials.layout.addWidget(self.textEdit_password)
-        self.layout.addWidget(self.widget_credentials)
+        self.widget_credentials.layout().addWidget(self.textEdit_username)
+        self.widget_credentials.layout().addWidget(self.textEdit_password)
+        self.layout().addWidget(self.widget_credentials)
 
         self.label_errorMessage = QtWidgets.QLabel("")
         self.label_errorMessage.setStyleSheet("QLabel { color : red; }")
         self.label_errorMessage.setWordWrap(True)
         self.label_errorMessage.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
         self.label_errorMessage.hide()
-        self.layout.addWidget(self.label_errorMessage)
+        self.layout().addWidget(self.label_errorMessage)
 
         self.widget_controls = QtWidgets.QWidget(self)
-        self.widget_controls.layout = QtWidgets.QHBoxLayout(self.widget_controls)
+        self.widget_controls.setLayout(QtWidgets.QHBoxLayout(self.widget_controls))
 
         self.pushButton_authenticate = QtWidgets.QPushButton(
             "Connect", self.widget_controls
@@ -280,9 +280,9 @@ class authWindow(QtWidgets.QWidget):
         self.pushButton_cancel = QtWidgets.QPushButton("Cancel", self.widget_controls)
         self.pushButton_cancel.clicked.connect(self.exit)
 
-        self.widget_controls.layout.addWidget(self.pushButton_authenticate)
-        self.widget_controls.layout.addWidget(self.pushButton_cancel)
-        self.layout.addWidget(self.widget_controls)
+        self.widget_controls.layout().addWidget(self.pushButton_authenticate)
+        self.widget_controls.layout().addWidget(self.pushButton_cancel)
+        self.layout().addWidget(self.widget_controls)
 
     def authenticate(self):
         server = GLPIServer(self.textEdit_url.text())
