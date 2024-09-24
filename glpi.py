@@ -127,7 +127,7 @@ class GLPI:
         atexit.register(self.__close)
 
         if len(url) == 0:
-            raise (BaseException("You need to provide an URL."))
+            raise (Exception("You need to provide an URL."))
 
         self.url = url
 
@@ -151,7 +151,7 @@ class GLPI:
             self.authUsingCredentials(username, password)
         else:
             raise (
-                BaseException(
+                Exception(
                     "You need to provide either an user token or an username and a password to authenticate against the GLPI REST API."
                 )
             )
@@ -190,7 +190,7 @@ class GLPI:
         )
 
         if not initSessionRequest.status_code == 200:
-            raise BaseException(
+            raise Exception(
                 str(initSessionRequest.status_code)
                 + " "
                 + str(initSessionRequest.reason)
@@ -240,7 +240,7 @@ class GLPI:
         elif searchOptionsRequest.status_code == 401:
             raise searchOptionsRequest.json()
         else:
-            raise BaseException(
+            raise Exception(
                 f"Unknow status code for this path : {searchOptionsRequest.status_code}.\n{searchOptionsRequest.json()}"
             )
 
@@ -274,7 +274,7 @@ class GLPI:
         elif searchRequest.status_code == 401:
             raise searchRequest.json()
         else:
-            raise BaseException(
+            raise Exception(
                 f"Unknow status code for this path : {searchRequest.status_code}."
             )
 
@@ -332,7 +332,7 @@ class GLPI:
         if requestResponse.status_code == 200:
             return BytesIO(requestResponse.content)
         else:
-            raise BaseException(requestResponse.json())
+            raise Exception(requestResponse.json())
 
     def getTextFromImage(self, document: BinaryIO | bytes) -> str:
         if type(document) == bytes:
