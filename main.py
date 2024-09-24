@@ -15,8 +15,38 @@ class mainWindow(QtWidgets.QWidget):
         self.lineEdit_text.setPlaceholderText("Text to search")
         self.layout().addWidget(self.lineEdit_text)
 
+        self.groupBox_preSearchOptions = QtWidgets.QGroupBox(self)
+        self.groupBox_preSearchOptions.setTitle(
+            "Options to filter ticker before deep searching"
+        )
+        self.groupBox_preSearchOptions.setLayout(QtWidgets.QGridLayout())
+        self.layout().addWidget(self.groupBox_preSearchOptions)
+
+        self.groupBox_searchOptions = QtWidgets.QGroupBox(self)
+        self.groupBox_searchOptions.setTitle("search features")
+        self.groupBox_searchOptions.setLayout(QtWidgets.QHBoxLayout())
+
+        self.searchInReplies = QtWidgets.QCheckBox("Replies")
+        self.searchInReplies.setChecked(True)
+        self.searchInDOCX = QtWidgets.QCheckBox("DOCX")
+        self.searchInXLSX = QtWidgets.QCheckBox("XLSX")
+        self.searchInPDF = QtWidgets.QCheckBox("PDF")
+        self.searchInImages = QtWidgets.QCheckBox("Images")
+        self.searchInUnknownFiles = QtWidgets.QCheckBox("Unknown Files")
+        self.followTicketLinks = QtWidgets.QCheckBox("Follow ticket links")
+        self.followTicketLinks.setChecked(True)
+
+        self.groupBox_searchOptions.layout().addWidget(self.searchInReplies)
+        self.groupBox_searchOptions.layout().addWidget(self.searchInDOCX)
+        self.groupBox_searchOptions.layout().addWidget(self.searchInXLSX)
+        self.groupBox_searchOptions.layout().addWidget(self.searchInPDF)
+        self.groupBox_searchOptions.layout().addWidget(self.searchInImages)
+        self.groupBox_searchOptions.layout().addWidget(self.searchInUnknownFiles)
+        self.groupBox_searchOptions.layout().addWidget(self.followTicketLinks)
+
+        self.layout().addWidget(self.groupBox_searchOptions)
+
         self.tableWidget_results = QtWidgets.QTableWidget()
-        # self.tableWidget_results.hide()
         self.tableWidget_results.setColumnCount(3)
         self.tableWidget_results.verticalHeader().hide()
 
@@ -25,7 +55,7 @@ class mainWindow(QtWidgets.QWidget):
         )
 
         self.tableWidget_results.setHorizontalHeaderItem(
-            1, QtWidgets.QTableWidgetItem("progress")
+            1, QtWidgets.QTableWidgetItem("search progress")
         )
 
         self.tableWidget_results.setHorizontalHeaderItem(
@@ -41,8 +71,16 @@ class mainWindow(QtWidgets.QWidget):
         self.tableWidget_results.sortByColumn(1, QtCore.Qt.SortOrder.AscendingOrder)
         self.layout().addWidget(self.tableWidget_results)
 
+        self.label_errorMessage = QtWidgets.QLabel("")
+        self.label_errorMessage.setStyleSheet("QLabel { color : red; }")
+        self.label_errorMessage.setWordWrap(True)
+        self.label_errorMessage.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
+        self.label_errorMessage.hide()
+        self.layout().addWidget(self.label_errorMessage)
+
         self.progressBar_search = QtWidgets.QProgressBar(self)
         self.layout().addWidget(self.progressBar_search)
+        self.progressBar_search.hide()
 
         self.pushButton_search = QtWidgets.QPushButton("Search")
         self.layout().addWidget(self.pushButton_search)
@@ -54,9 +92,9 @@ class mainWindow(QtWidgets.QWidget):
         self.setWindowTitle("GLPY - Search")
 
         self.setMinimumSize(750, 800)
+        self.ticketSearchOptions: dict = {}
 
         self.server = GLPIServer
-
         self.availableCores = os.sched_getaffinity(0)
 
         self.searchProcessPools: List[QtCore.QProcess] = []
@@ -67,12 +105,84 @@ class mainWindow(QtWidgets.QWidget):
 
         self.ticketIDLength = 1
 
+        self.searchOptionRowCount = 0
+
         self.setLayout(QtWidgets.QVBoxLayout())
 
         self.__setupWidgets()
 
+    def addNewSearchOptionLine(self):
+        rowCount = self.groupBox_preSearchOptions.layout().rowCount() - 1
+
+        pushButton_logic = QtWidgets.QComboBox()
+        pushButton_logic.addItem("AND")
+        pushButton_logic.addItem("OR")
+        pushButton_logic.addItem("AND NOT")
+        pushButton_logic.addItem("OR NOT")
+        pushButton_logic.addItem("🗑")
+        self.groupBox_preSearchOptions.layout().addWidget(pushButton_logic, rowCount, 0)
+
+        comboBox_option = QtWidgets.QComboBox()
+        comboBox_option.setEditable(True)
+
+        for category in self.ticketSearchOptions.values():
+            for optionName in list(category.keys()):
+                comboBox_option.addItem(optionName)
+
+        comboBox_option.setInsertPolicy(QtWidgets.QComboBox.InsertPolicy.NoInsert)
+        self.groupBox_preSearchOptions.layout().addWidget(comboBox_option, rowCount, 1)
+
+        comboBox_option.currentIndexChanged.connect(
+            lambda comboBoxIndexPos, comboBoxID=self.searchOptionRowCount: self.changeSearchOptionComparison(
+                comboBoxIndexPos, comboBoxID
+            )
+        )
+
+        comboBox_option.comboBoxID = self.searchOptionRowCount
+
+        comboBox_comparison = QtWidgets.QComboBox()
+        comboBox_comparison.setDisabled(True)
+        self.groupBox_preSearchOptions.layout().addWidget(
+            comboBox_comparison, rowCount, 2
+        )
+
+        comboBox_searchValue = QtWidgets.QComboBox()
+        comboBox_searchValue.setDisabled(True)
+        self.groupBox_preSearchOptions.layout().addWidget(
+            comboBox_searchValue, rowCount, 3
+        )
+
+        self.searchOptionRowCount += 1
+
+    def changeSearchOptionComparison(self, comboBoxIndexPos: int, comboBoxID: int):
+        layout: QtWidgets.QGridLayout = self.groupBox_preSearchOptions.layout()
+
+        for rowPos in range(0, layout.rowCount()):
+            item = layout.itemAtPosition(rowPos, 1)
+
+            if comboBoxID == item.widget().comboBoxID:
+
+                comboBox_option: QtWidgets.QComboBox = layout.itemAtPosition(
+                    rowPos, 1
+                ).widget()
+                comboBox_comparison = layout.itemAtPosition(rowPos, 2).widget()
+                comboBox_searchValue = layout.itemAtPosition(rowPos, 3).widget()
+                pass
+
+        for category in self.ticketSearchOptions.values():
+            for optionName, optionProperties in list(category.items()):
+                if optionName == comboBox_option.currentText():
+                    comboBox_comparison.setEnabled(True)
+                    comboBox_comparison.clear()
+                    comboBox_comparison.addItems(
+                        optionProperties["available_searchtypes"]
+                    )
+                    pass
+
     def setServer(self, server: GLPIServer):
         self.server = server
+        self.ticketSearchOptions = self.server.searchOptions(itemType="Ticket")
+        self.addNewSearchOptionLine()
 
     def handle_stdout(self, pos: int):
         data = self.searchProcessPools[pos].readAllStandardOutput()
@@ -81,7 +191,7 @@ class mainWindow(QtWidgets.QWidget):
             object = json.loads(stdout)
         except Exception as e:
             print(e, stdout)
-            exit()
+            return
 
         self.ticketsSearched += 1
 
@@ -106,7 +216,7 @@ class mainWindow(QtWidgets.QWidget):
     def handle_stderr(self, pos: int):
         data = self.searchProcessPools[pos].readAllStandardError()
         stderr = bytes(data).decode("utf8")
-        print(stderr, file=sys.stderr)
+        print(f"process : {pos}\n{stderr}", file=sys.stderr)
 
     def process_finished(self, pos: int):
         self.processFinished += 1
@@ -119,13 +229,21 @@ class mainWindow(QtWidgets.QWidget):
             self.ticketsPools: List[str] = [""] * len(self.availableCores)
 
     def search(self):
+        self.label_errorMessage.hide()
+        self.progressBar_search.show()
         self.pushButton_search.setDisabled(True)
         self.lineEdit_text.setDisabled(True)
         self.tableWidget_results.setSortingEnabled(False)
 
-        self.tickets = list(
-            self.server.search(itemType="Ticket", range="0-9999999999")["data"].keys()
-        )
+        searchResults = self.server.search(itemType="Ticket", range="0-9999999999")
+
+        if "data" not in searchResults:
+            self.label_errorMessage.setText("No tickets has been found.")
+            self.label_errorMessage.show()
+            self.pushButton_search.setEnabled(True)
+            return
+
+        self.tickets = list(searchResults["data"].keys())
 
         self.ticketIDLength = 1
         for ticket in self.tickets:
@@ -177,20 +295,19 @@ class mainWindow(QtWidgets.QWidget):
                 0 : len(self.ticketsPools[ticketsPool]) - 1
             ]
 
-            self.searchProcessPools.append(QtCore.QProcess(self))
-            self.searchProcessPools[ticketsPool].readyReadStandardOutput.connect(
-                lambda pos=ticketsPool: self.handle_stdout(pos)
-            )
-            self.searchProcessPools[ticketsPool].readyReadStandardError.connect(
-                lambda pos=ticketsPool: self.handle_stderr(pos)
-            )
-            self.searchProcessPools[ticketsPool].finished.connect(
-                lambda pos=ticketsPool: self.process_finished(pos)
-            )
+            if self.ticketsPools[ticketsPool]:
+                self.searchProcessPools.append(QtCore.QProcess(self))
+                self.searchProcessPools[ticketsPool].readyReadStandardOutput.connect(
+                    lambda pos=ticketsPool: self.handle_stdout(pos)
+                )
+                self.searchProcessPools[ticketsPool].readyReadStandardError.connect(
+                    lambda pos=ticketsPool: self.handle_stderr(pos)
+                )
+                self.searchProcessPools[ticketsPool].finished.connect(
+                    lambda pos=ticketsPool: self.process_finished(pos)
+                )
 
-            self.searchProcessPools[ticketsPool].start(
-                "python",
-                [
+                args = [
                     "glpi.py",
                     "--url",
                     self.server.url,
@@ -202,21 +319,44 @@ class mainWindow(QtWidgets.QWidget):
                     self.ticketsPools[ticketsPool],
                     "--textToSearch",
                     self.lineEdit_text.text(),
-                    "--closeSession",
-                    False,
-                ],
-            )
+                ]
+
+                if self.searchInDOCX.isChecked():
+                    args.append("--searchInDOCX")
+
+                if self.searchInXLSX.isChecked():
+                    args.append("--searchInXLSX")
+
+                if self.searchInPDF.isChecked():
+                    args.append("--searchInPDF")
+
+                if self.searchInUnknownFiles.isChecked():
+                    args.append("--searchInUnknownFiles")
+
+                if self.searchInImages.isChecked():
+                    args.append("--searchInImages")
+
+                if self.searchInImages.isChecked():
+                    args.append("--searchInImages")
+
+                if self.followTicketLinks.isChecked():
+                    args.append("--followTicketLinks")
+
+                if self.searchInUnknownFiles.isChecked():
+                    args.append("--searchInUnknownFiles")
+
+                self.searchProcessPools[ticketsPool].start("python", args)
 
         self.tableWidget_results.setSortingEnabled(True)
 
-class authWindow(QtWidgets.QWidget):
 
+class authWindow(QtWidgets.QWidget):
     def __init__(self, args: arguments, mainWidget: mainWindow):
         super().__init__()
 
         self.setWindowTitle("GLPY - Auth")
 
-        self.setMinimumSize(400, 300)
+        self.setMinimumSize(500, 400)
 
         self.setLayout(QtWidgets.QVBoxLayout())
 
@@ -250,7 +390,7 @@ class authWindow(QtWidgets.QWidget):
         self.layout().addWidget(self.widget_tokens)
 
         self.widget_credentials = QtWidgets.QWidget(self)
-        self.widget_credentials.layout = QtWidgets.QVBoxLayout(self.widget_credentials)
+        self.widget_credentials.setLayout(QtWidgets.QVBoxLayout())
 
         self.textEdit_username = QtWidgets.QLineEdit(self.widget_credentials)
         self.textEdit_username.setPlaceholderText("Username")
@@ -285,40 +425,22 @@ class authWindow(QtWidgets.QWidget):
         self.layout().addWidget(self.widget_controls)
 
     def authenticate(self):
-        server = GLPIServer(self.textEdit_url.text())
+        try:
+            server = GLPIServer(
+                url=self.textEdit_url.text(),
+                applicationToken=self.textEdit_applicationToken.text(),
+                userToken=self.textEdit_userToken.text(),
+                username=self.textEdit_username.text(),
+                password=self.textEdit_password.text(),
+            )
+        except Exception as e:
+            self.label_errorMessage.setHidden(False)
+            self.label_errorMessage.setText(str(e))
+            return
 
-        if len(self.textEdit_applicationToken.text()) > 0:
-            server.setApplicationToken(self.textEdit_applicationToken.text())
-
-        if len(self.textEdit_userToken.text()) > 0:
-            try:
-                server.authUsingToken(self.textEdit_userToken.text())
-            except BaseException as e:
-                if "ERROR_GLPI" in str(e):
-                    self.label_errorMessage.setText(str(e))
-                    self.label_errorMessage.show()
-                return
-
-            mainWidget.setServer(server)
-            mainWidget.show()
-            self.hide()
-        elif (
-            len(self.textEdit_username.text()) > 0
-            and len(self.textEdit_password.text()) > 0
-        ):
-            try:
-                server.authUsingCredentials(
-                    self.textEdit_username.text(), self.textEdit_password.text()
-                )
-            except BaseException as e:
-                if "ERROR_GLPI" in str(e):
-                    self.label_errorMessage.setText(str(e))
-                    self.label_errorMessage.show()
-                return
-
-            mainWidget.setServer(server)
-            mainWidget.show()
-            self.hide()
+        mainWidget.setServer(server)
+        mainWidget.show()
+        self.hide()
 
     def exit(self):
         app.exit(0)

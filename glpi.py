@@ -18,19 +18,26 @@ from pypdf import PdfReader
 from PIL import Image
 from bs4 import BeautifulSoup
 
-
 class arguments:
     url = None
-    username = None
-    password = None
-    userToken = None
-    applicationToken = None
+    username = ""
+    password = ""
+    userToken = ""
+    sessionToken = ""
+    applicationToken = ""
     APIPath = None
-    sessionToken = None
+
+    searchInReplies = False
+    searchInDOCX = False
+    searchInXLSX = False
+    searchInPDF = False
+    searchInImages = False
+    searchInUnknownFiles = False
+    followTicketLinks = False
 
     ticketNumbers = None
     textToSearch = None
-    closeSession = True
+    closeSession = False
 
 
 def setupArgumentsParsing():
@@ -40,15 +47,47 @@ def setupArgumentsParsing():
     )
 
     parser.add_argument("-url", "--url")
-    parser.add_argument("-u", "--username")
-    parser.add_argument("-p", "--password")
-    parser.add_argument("-ut", "--userToken")
-    parser.add_argument("-at", "--applicationToken")
-    parser.add_argument("-ap", "--APIPath", default="/apirest.php")
-    parser.add_argument("-st", "--sessionToken")
-    parser.add_argument("-tn", "--ticketNumbers")
-    parser.add_argument("-ts", "--textToSearch")
-    parser.add_argument("-cs", "--closeSession", default=True)
+    parser.add_argument("-u", "--username", type=str)
+    parser.add_argument("-p", "--password", type=str)
+    parser.add_argument("-ut", "--userToken", type=str)
+    parser.add_argument("-at", "--applicationToken", type=str)
+    parser.add_argument("-ap", "--APIPath", default="/apirest.php", type=str)
+    parser.add_argument("-st", "--sessionToken", type=str)
+    parser.add_argument("-tn", "--ticketNumbers", type=str)
+    parser.add_argument("-ts", "--textToSearch", type=str)
+    parser.add_argument(
+        "-sor",
+        "--searchInReplies",
+        default=False,
+        action=argparse.BooleanOptionalAction,
+    )
+    parser.add_argument(
+        "-sodx", "--searchInDOCX", default=False, action=argparse.BooleanOptionalAction
+    )
+    parser.add_argument(
+        "-soxx", "--searchInXLSX", default=False, action=argparse.BooleanOptionalAction
+    )
+    parser.add_argument(
+        "-sopf", "--searchInPDF", default=False, action=argparse.BooleanOptionalAction
+    )
+    parser.add_argument(
+        "-soi", "--searchInImages", default=False, action=argparse.BooleanOptionalAction
+    )
+    parser.add_argument(
+        "-suf",
+        "--searchInUnknownFiles",
+        default=False,
+        action=argparse.BooleanOptionalAction,
+    )
+    parser.add_argument(
+        "-ftl",
+        "--followTicketLinks",
+        default=False,
+        action=argparse.BooleanOptionalAction,
+    )
+    parser.add_argument(
+        "-cs", "--closeSession", default=False, action=argparse.BooleanOptionalAction
+    )
 
     return parser.parse_args(namespace=arguments)
 
@@ -77,18 +116,45 @@ class GLPI:
     def __init__(
         self,
         url: str,
+        applicationToken: str,
+        userToken: str = "",
+        sessionToken: str = "",
+        username: str = "",
+        password: str = "",
         APIPath: str = "/apirest.php",
+        closeSession: bool = True,
     ) -> None:
         atexit.register(self.__close)
 
+        if len(url) == 0:
+            raise (BaseException("You need to provide an URL."))
+
         self.url = url
+
         self.APIPath = APIPath
 
-        self._closeSession = False
+        self._closeSession = closeSession
         self.__authenticated = False
 
         self.session = requests.Session()
         self.session.headers = {"Content-Type": "application/json"}
+
+        if len(applicationToken) > 0:
+            self.setApplicationToken(applicationToken)
+
+        if len(sessionToken) > 0:
+            self._setSessionToken(args.sessionToken)
+            self._closeSession = False
+        elif len(userToken) > 0:
+            self.authUsingToken(userToken)
+        elif len(username) > 0 and len(password) > 0:
+            self.authUsingCredentials(username, password)
+        else:
+            raise (
+                BaseException(
+                    "You need to provide either an user token or an username and a password to authenticate against the GLPI REST API."
+                )
+            )
 
     def __close(self) -> None:
         if self.__authenticated and self._closeSession:
@@ -100,10 +166,9 @@ class GLPI:
     def authUsingCredentials(self, username: str, password: str):
         credentials = username + ":" + password
         encodedCredentials = base64.b64encode(credentials.encode()).decode("utf-8")
+        del credentials
 
         self.session.headers.update({"Authorization": f"Basic {encodedCredentials}"})
-
-        del credentials
         del encodedCredentials
 
         self.__initSession()
@@ -129,6 +194,8 @@ class GLPI:
                 str(initSessionRequest.status_code)
                 + " "
                 + str(initSessionRequest.reason)
+                + ":\n"
+                + str(initSessionRequest.json())
             )
 
         self.session.headers.pop("Authorization")
@@ -276,10 +343,17 @@ class GLPI:
         return str(BeautifulSoup(html.unescape(text), features="html.parser"))
 
     def searchTextInItemDocuments(
-        self, text: str, itemType: str, itemID: int
+        self,
+        text: str,
+        itemType: str,
+        itemID: int,
+        searchInImages: bool,
+        searchInPDF: bool,
+        searchInDOCX: bool,
+        searchInXLSX: bool,
     ) -> tuple[bool, str]:
         for document in self.getSubItem(itemType, itemID, "Document"):
-            if document["mime"].find("image") >= 0:
+            if searchInImages and document["mime"].find("image") >= 0:
                 textPosition = self.getTextFromImage(
                     self.downloadDocument(document["id"])
                 ).find(text)
@@ -289,7 +363,7 @@ class GLPI:
                         True,
                         f"Found '{text}' in image '{document['name']}' at position {textPosition}.",
                     )
-            elif document["mime"] == "application/pdf":
+            elif searchInPDF and document["mime"] == "application/pdf":
                 reader = PdfReader(self.downloadDocument(document["id"]))
 
                 for pagePosition in range(0, len(reader.pages)):
@@ -310,8 +384,7 @@ class GLPI:
                                 True,
                                 f"Found '{text}' in pdf '{document['name']}' at page {pagePosition}, in image '{image.name}' at position {textPosition}.",
                             )
-
-            elif document["filename"].find(".docx") >= 0:
+            elif searchInDOCX and document["filename"].find(".docx") >= 0:
                 reader = docxDocument(self.downloadDocument(document["id"]))
 
                 for p in reader.paragraphs:
@@ -322,7 +395,7 @@ class GLPI:
                             True,
                             f"Found '{text}' in docx '{document['name']}', position {textPosition}.",
                         )
-            elif document["filename"].find(".xlsx") >= 0:
+            elif searchInXLSX and document["filename"].find(".xlsx") >= 0:
                 wb = load_workbook(self.downloadDocument(document["id"]))
 
                 for sheetName in wb.sheetnames:
@@ -344,14 +417,17 @@ class GLPI:
         self,
         text: str,
         ticketNumber: int,
-        searchInImages: bool = False,
+        searchInReplies: bool = True,
         searchInDOCX: bool = True,
         searchInXLSX: bool = True,
         searchInPDF: bool = True,
+        searchInImages: bool = False,
         searchInUnknownFiles: bool = True,
         followTicketLinks: bool = True,
-        searchInReplies: bool = True,
     ) -> tuple[bool, str]:
+
+        if len(text) < 0:
+            raise (Exception("Please provide some text to search."))
 
         ticket = self.getItem("Ticket", itemID=ticketNumber)
 
@@ -371,81 +447,93 @@ class GLPI:
         if textPosition >= 0:
             return (
                 True,
-                f"Found '{text}' in ticket {ticket['id']} at position {textPosition}.",
+                f"Found '{text}' in ticket {ticket['id']} description at position {textPosition}.",
             )
 
-        foundInImage, imageSearchResult = self.searchTextInItemDocuments(
-            itemType="Ticket", text=text, itemID=ticket["id"]
+        foundInItemDocuments, documentSearchResult = self.searchTextInItemDocuments(
+            itemType="Ticket",
+            text=text,
+            itemID=ticket["id"],
+            searchInDOCX=searchInDOCX,
+            searchInXLSX=searchInXLSX,
+            searchInPDF=searchInPDF,
+            searchInImages=searchInImages,
         )
 
-        if foundInImage:
+        if foundInItemDocuments:
             return (
                 True,
-                f"Result found in ticket {ticketNumber} -> {imageSearchResult}",
+                f"Result found in ticket {ticketNumber} -> {documentSearchResult}",
             )
 
-        for subItemCategory in [
-            "ITILFollowup",
-            "TicketTask",
-            "TicketValidation",
-            "ITILSolution",
-        ]:
-            for subItem in self.getSubItem("Ticket", ticketNumber, subItemCategory):
-                if subItemCategory == "TicketValidation":
-                    textPosition = self.parseAndSoupHTMLContent(
-                        subItem["comment_submission"]
-                    ).find(text)
-                else:
-                    textPosition = self.parseAndSoupHTMLContent(
-                        subItem["content"]
-                    ).find(text)
+        if searchInReplies:
+            for subItemCategory in [
+                "ITILFollowup",
+                "TicketTask",
+                "TicketValidation",
+                "ITILSolution",
+            ]:
+                for subItem in self.getSubItem("Ticket", ticketNumber, subItemCategory):
+                    if subItemCategory == "TicketValidation":
+                        textPosition = self.parseAndSoupHTMLContent(
+                            subItem["comment_submission"]
+                        ).find(text)
+                    else:
+                        textPosition = self.parseAndSoupHTMLContent(
+                            subItem["content"]
+                        ).find(text)
 
-                if textPosition >= 0:
-                    return (
-                        True,
-                        f"Found '{text}' at position {textPosition} in {subItemCategory} {subItem['id']}.",
+                    if textPosition >= 0:
+                        return (
+                            True,
+                            f"Found '{text}' at position {textPosition} in {subItemCategory} {subItem['id']}.",
+                        )
+
+                    foundInItemDocuments, documentSearchResult = (
+                        self.searchTextInItemDocuments(
+                            itemType="Ticket",
+                            text=text,
+                            itemID=ticket["id"],
+                            searchInDOCX=searchInDOCX,
+                            searchInXLSX=searchInXLSX,
+                            searchInPDF=searchInPDF,
+                            searchInImages=searchInImages,
+                        )
                     )
 
-                foundInImage, imageSearchResult = self.searchTextInItemDocuments(
-                    itemType=subItemCategory, text=text, itemID=subItem["id"]
-                )
-
-                if foundInImage:
-                    return (
-                        True,
-                        f"Found '{text}' in {subItemCategory} {subItem['id']} -> \t-{imageSearchResult}",
-                    )
+                    if foundInItemDocuments:
+                        return (
+                            True,
+                            f"Result found in ticket {ticketNumber} -> {documentSearchResult}",
+                        )
 
         return (False, "")
+
 
 if __name__ == "__main__":
     args = setupArgumentsParsing()
 
-    server = GLPI(args.url)
+    server = GLPI(
+        args.url,
+        args.applicationToken,
+        args.userToken,
+        args.sessionToken,
+        args.username,
+        args.password,
+    )
 
-    server._closeSession = args.closeSession
-
-    if args.applicationToken:
-        server.setApplicationToken(args.applicationToken)
-
-    if args.sessionToken:
-        server._setSessionToken(args.sessionToken)
-    elif args.userToken:
-        server.authUsingToken(args.userToken)
-    elif args.username and args.password:
-        server.authUsingCredentials(args.username, args.password)
-
-    if args.ticketNumbers and args.textToSearch:
-        for ticketNumber in args.ticketNumbers.split(","):
+    for ticketNumber in args.ticketNumbers.split(","):
+        try:
             isFound, message = server.deepSearchInTicket(
                 text=args.textToSearch,
                 ticketNumber=int(ticketNumber),
-                searchInReplies=True,
-                searchInDOCX=True,
-                searchInImages=True,
-                searchInPDF=True,
-                searchInUnknownFiles=True,
-                searchInXLSX=True,
+                searchInReplies=args.searchInReplies,
+                searchInDOCX=args.searchInDOCX,
+                searchInXLSX=args.searchInXLSX,
+                searchInPDF=args.searchInPDF,
+                searchInImages=args.searchInImages,
+                searchInUnknownFiles=args.searchInUnknownFiles,
+                followTicketLinks=args.followTicketLinks,
             )
 
             if isFound:
@@ -470,5 +558,16 @@ if __name__ == "__main__":
                 )
 
             sys.stdout.flush()
+        except Exception as e:
+            sys.stderr.write(
+                json.dumps(
+                    {
+                        "Ticket.id": ticketNumber,
+                        "progress": "Error",
+                        "result": str(e),
+                    }
+                )
+            )
+            sys.stderr.flush()
 
-        sys.exit(0)
+    sys.exit(0)
