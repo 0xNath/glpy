@@ -124,17 +124,16 @@ class GLPI:
         APIPath: str = "/apirest.php",
         closeSession: bool = True,
     ) -> None:
-        atexit.register(self.__close)
-
         if len(url) == 0:
             raise (Exception("You need to provide an URL."))
 
         self.url = url
-
         self.APIPath = APIPath
 
         self._closeSession = closeSession
         self.__authenticated = False
+
+        atexit.register(self.__close)
 
         self.session = requests.Session()
         self.session.headers = {"Content-Type": "application/json"}
